@@ -8,9 +8,9 @@
 @time: May 20, 2019
 """
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf-8')
+# import sys
+# reload(sys)
+# sys.setdefaultencoding('utf-8')
 import os
 
 from model_GAN_RNN import GAN
@@ -78,15 +78,15 @@ def loadLabel(label):
               
 ################################# loas data ###################################
 def loadData():
-    print "loading labels",
+    print("loading labels", end=" ")
     labelDic = {}
     for line in open(labelPath):
         line = line.rstrip()
         eid, label = line.split('\t')[0], line.split('\t')[1]
         labelDic[eid] = label
-    print len(labelDic)
+    print(len(labelDic))
     
-    print "reading events", ## X
+    print("reading events", end=" ")
     textDic = {}
     for line in open(textPath):
         line = line.rstrip()
@@ -96,9 +96,9 @@ def loadData():
            textDic[eid][ts] = Vec
         else:
            textDic[eid] = {ts: Vec} 
-    print len(textDic)
+    print(len(textDic))
     
-    print "loading train set", 
+    print("loading train set", end=" ")
     x_word_train, y_train, y_gen_train, Len_train, c = [], [], [], [], 0
     index_true, index_false = [], []
     for eid in open(trainPath):
@@ -118,9 +118,9 @@ def loadData():
         wordFreq = dic2matrix( textDic[eid] )
         x_word_train.append( wordFreq )
         c += 1
-    print c
+    print(c)
     
-    print "loading test set", 
+    print("loading test set", end=" ")
     x_word_test, y_test, Len_test, c = [], [], [], 0
     for eid in open(testPath):
         #if c > 4: break
@@ -135,7 +135,7 @@ def loadData():
         wordFreq = dic2matrix( textDic[eid] )
         x_word_test.append( wordFreq )
         c += 1
-    print c
+    print(c)
     #print "train no:", len(x_word_train), len(y_train), len(y_gen_train), len(Len_train)
     #print "test no:", len(x_word_test), len(y_test), len(Len_test)    
     #print "dim1 for 0:", len(x_word_train[0]), len(x_word_train[0][0]), y_train[0], y_gen_train[0], Len_train[0]
@@ -151,7 +151,7 @@ x_word_train, y_train, yg_train, Len_train, x_word_test, y_test, index_true, ind
 t0 = time.time()
 GANmodel = GAN(vocabulary_size, hidden_dim, Nclass)
 t1 = time.time()
-print 'GAN-RNN model established,', (t1-t0)/60
+print("GAN model established using {} minutes".format((t1-t0)/60))
 
 ## 3. pre-train or load model
 if os.path.isfile(modelPath):

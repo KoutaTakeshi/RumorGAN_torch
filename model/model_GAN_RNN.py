@@ -37,15 +37,22 @@ class GAN():
             self.hidden_size = hidden_size ## hidden dim: 100
             self.Nclass = Nclass ## no. of classes:2 or 4
             self.bptt_truncate=bptt_truncate
-            # emb layer & encoder
-            self.Eg_en_nr = theano.shared(name='Eg_en_nr', value=init_matrix([self.hidden_size, self.vocab_size]))            
+            ## emb layer & encoder
+            # embedding matrix
+            self.Eg_en_nr = theano.shared(name='Eg_en_nr', value=init_matrix([self.hidden_size, self.vocab_size]))
             self.Eg_de_nr = theano.shared(name='Eg_de_nr', value=init_matrix([self.vocab_size, self.hidden_size]))
+            # embedding bias
             self.cg_de_nr = theano.shared(name='cg_de_nr', value=init_vector([self.vocab_size]))
-            # GRU: encoder
+
+            ## GRU: encoder
+            # current input weight matrix
             self.Wg_en_nr = theano.shared(name='Wg_en_nr', value=init_matrix([3, self.hidden_size, self.hidden_size]))
+            # previous hidden state weight matrix
             self.Ug_en_nr = theano.shared(name='Ug_en_nr', value=init_matrix([3, self.hidden_size, self.hidden_size]))
+            # GRU bias
             self.bg_en_nr = theano.shared(name='bg_en_nr', value=init_vector([3, self.hidden_size]))
-            # GRU: decoder
+
+            ## GRU: decoder
             self.Wg_de_nr = theano.shared(name='Wg_de_nr', value=init_matrix([3, self.hidden_size, self.hidden_size]))
             self.Ug_de_nr = theano.shared(name='Ug_de_nr', value=init_matrix([3, self.hidden_size, self.hidden_size]))
             self.bg_de_nr = theano.shared(name='bg_de_nr', value=init_vector([3, self.hidden_size]))  
@@ -54,24 +61,25 @@ class GAN():
                                self.Wg_de_nr,self.Ug_de_nr, self.bg_de_nr]
             
         def generate(self, x, l): 
-            ## stage1: encode sentence ##
+            '''stage1: encode sentence'''
             # x:matrix; l:int;            
             def encode_sen_step(xt, st_prev):
-                xe = self.Eg_en_nr.dot(xt)
-                zt = T.nnet.sigmoid(self.Wg_en_nr[0].dot(xe)+self.Ug_en_nr[0].dot(st_prev)+self.bg_en_nr[0])
-                rt = T.nnet.sigmoid(self.Wg_en_nr[1].dot(xe)+self.Ug_en_nr[1].dot(st_prev)+self.bg_en_nr[1])
-                ct = T.tanh(self.Wg_en_nr[2].dot(xe)+self.Ug_en_nr[2].dot(st_prev * rt)+self.bg_en_nr[2])
-                st = zt*st_prev + (1-zt)*ct
+                xe = self.Eg_en_nr.dot(xt) # embedding of xt
+                zt = T.nnet.sigmoid(self.Wg_en_nr[0].dot(xe)+self.Ug_en_nr[0].dot(st_prev)+self.bg_en_nr[0]) # update gate
+                rt = T.nnet.sigmoid(self.Wg_en_nr[1].dot(xe)+self.Ug_en_nr[1].dot(st_prev)+self.bg_en_nr[1]) # reset gate
+                ct = T.tanh(self.Wg_en_nr[2].dot(xe)+self.Ug_en_nr[2].dot(st_prev * rt)+self.bg_en_nr[2]) # candidate hideen state
+                st = zt*st_prev + (1-zt)*ct # new hidden state
                 return st
-            
+
+            # use theano.scan to iterate every time step of input x(recursion process)
             s_en_nr, updates = theano.scan(
                 fn=encode_sen_step,
-                sequences = x,
-                outputs_info = dict(initial=T.zeros(self.hidden_size)))
+                sequences=x,
+                outputs_info=dict(initial=T.zeros(self.hidden_size)))
             
-            ## stage2: decode sentence ##
+            '''stage2: decode sentence'''
             #h1 = T.tanh(self.Vg.dot(s_en[-1]) + self.Vgy[:,y] + self.cg) ## size:100*1
-            w1 = T.nnet.relu( self.Eg_de_nr.dot(s_en_nr[-1]) + self.cg_de_nr )
+            w1 = T.nnet.relu(self.Eg_de_nr.dot(s_en_nr[-1]) + self.cg_de_nr)
             
             def decode_step(wt_prev, st_prev):
                 xe = self.Eg_en_nr.dot(wt_prev)
@@ -86,8 +94,10 @@ class GAN():
             (words, _), updates = theano.scan(
                 fn=decode_step,
                 outputs_info = [w1, s_en_nr[-1]],
-                n_steps=l)
-            return T.concatenate([[w1],words[:-1]])
+                n_steps=l) # n_steps: time steps of decoding(l is the word num of an event)
+
+            # concantenate the first state w1 with hidden state words in decoding process(discard the extra output)
+            return T.concatenate([[w1], words[:-1]])
 
     class Generator_RN():
         def __init__(self, vocab_size, hidden_size=5, Nclass=2, bptt_truncate=4):
@@ -161,7 +171,7 @@ class GAN():
             self.bd = theano.shared(name='bd', value=init_vector([3, self.hidden_size]))
             self.Vd = theano.shared(name='Vd', value=init_matrix([self.Nclass, self.hidden_size]))
             self.cd = theano.shared(name='cd', value=init_vector([self.Nclass]))
-            self.params_d = [self.Eg_en, self.Wd, self.Ud, self.bd, self.Vd,self.cd]
+            self.params_d = [self.Eg_en, self.Wd, self.Ud, self.bd, self.Vd, self.cd]
             
         def discriminate(self, x): 
             def _recurrence(xt, st_prev):
@@ -180,7 +190,8 @@ class GAN():
             avgS = s_d[-1]
             prediction_c = T.nnet.softmax( self.Vd.dot(avgS)+self.cd )
             return prediction_c
-            
+
+        # loss between origin Xw and reconstructed Xe
         def contCmp(self, Xw, Xe):
             results, updates = theano.scan(
                  lambda xw,xe: T.mean( (xw-xe)**2 ), 
@@ -188,146 +199,145 @@ class GAN():
             return T.mean(results)#, T.sum(results)
             
     def define_train_test_funcs(self):
-          G_NR = self.Generator_NR(self.vocab_size, self.hidden_size, self.Nclass)
-          G_RN = self.Generator_RN(self.vocab_size, self.hidden_size, self.Nclass)
-          D = self.Discriminator(self.vocab_size, self.hidden_size, self.Nclass)
-          
-          self.params_dis = D.params_d
-          self.params_gnr = G_NR.params_gnr
-          self.params_grn = G_RN.params_grn
-          self.params_gen = G_NR.params_gnr + G_RN.params_grn          
-          lr = T.scalar("lr")
-          
-          ## step1: update generator NR
-          X_nr = G_NR.generate(self.X_word, self.Len) # step 1.1: X_n -> G_nr -> X_nr
-          self.gen_nr = theano.function(inputs = [self.X_word, self.Len], outputs = X_nr)
-                                          
-          dgnr = D.discriminate( X_nr )
-          self.d_gen_nr = theano.function(inputs = [self.X_word, self.Len], outputs = dgnr)
-                    
-               
-          X_nrn = G_RN.generate(X_nr, self.Len) # step 1.2: X_nr -> G_rn -> X_nrn
-          self.gen_nrn = theano.function(inputs = [self.X_word, self.Len], outputs = X_nrn)
-          
-          loss_nrn = D.contCmp(self.X_word, X_nrn)  # loss_rec 
-          self.f_loss_nrn = theano.function(inputs = [self.X_word, self.Len], outputs = loss_nrn)
-
-          loss_gnr = T.sum( (dgnr-self.Yg)**2 ) # loss_D
-          self.loss_gen_nr = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_gnr)
-     
-          #loss_nr = loss_gnr + 0.02*loss_nrn 
-          loss_nr = loss_gnr + loss_nrn 
-          self.f_loss_nr = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_nr)
-
-          gparams_gnr_pre = [] ## only loss_D
-          for param in self.params_gnr:
-              gparam = T.grad(loss_gnr, param)
-              gparams_gnr_pre.append(gparam)
-          updates_gnr_pre = self.gradient_descent(self.params_gnr, gparams_gnr_pre, lr)
-          self.train_gnr_pre = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_gnr_pre)
-          
-          gparams_gnr = [] ## loss_D +lossC
-          for param in self.params_gen:
-              gparam = T.grad(loss_nr, param)
-              gparams_gnr.append(gparam)
-          updates_gnr= self.gradient_descent(self.params_gen, gparams_gnr, lr)
-          self.train_gnr = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_gnr)
-
-          ## step2: update generator RN
-          X_rn = G_RN.generate(self.X_word, self.Len) # step 2.1: X_r -> G_rn -> X_rn
-          self.gen_rn = theano.function(inputs = [self.X_word, self.Len], outputs = X_rn)
-                                          
-          dgrn = D.discriminate( X_rn )
-          self.d_gen_rn = theano.function(inputs = [self.X_word, self.Len], outputs = dgrn)
-                    
-          loss_grn = T.sum( (dgrn-self.Yg)**2 ) # loss_D
-          self.loss_gen_rn = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_grn)
-          
-          X_rnr = G_NR.generate(X_rn, self.Len) # step 2.2: X_rn -> G_nr -> X_rnr
-          self.gen_rnr = theano.function(inputs = [self.X_word, self.Len], outputs = X_rnr)
-          
-          loss_rnr = D.contCmp(self.X_word, X_rnr) # loss_rec
-          self.f_loss_rnr = theano.function(inputs = [self.X_word, self.Len], outputs = loss_rnr)
-          
-          #loss_rn = loss_grn + 0.02*loss_rnr 
-          loss_rn = loss_grn + loss_rnr 
-          self.f_loss_rn = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_rn)
-          
-          gparams_grn = [] 
-          for param in self.params_gen:
-              gparam = T.grad(loss_rn, param)
-              gparams_grn.append(gparam)
-          updates_grn = self.gradient_descent(self.params_gen, gparams_grn, lr)
-          self.train_grn = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_grn)
-          
-          gparams_grn_pre = [] ## only loss_D
-          for param in self.params_grn:
-              gparam = T.grad(loss_grn, param)
-              gparams_grn_pre.append(gparam)
-          updates_grn_pre = self.gradient_descent(self.params_grn, gparams_grn_pre, lr)
-          self.train_grn_pre = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_grn_pre)
-          
-          ## step3: update discriminate     
-          d1 = D.discriminate(self.X_word) # for orignal X
-          self.dis1 = theano.function(inputs = [self.X_word], outputs = d1)
-          loss_d1 = T.sum( (d1-self.Y)**2 )
-          self.loss_dis1 = theano.function(inputs = [self.X_word, self.Y], outputs = loss_d1)
-          gparams_d = []
-          for param in self.params_dis:
-              gparam = T.grad(loss_d1, param)
-              gparams_d.append(gparam)
-          updates_d = self.gradient_descent(self.params_dis, gparams_d, lr)
-          self.train_d = theano.function(inputs = [self.X_word, self.Y, lr], updates = updates_d)
+            G_NR = self.Generator_NR(self.vocab_size, self.hidden_size, self.Nclass)
+            G_RN = self.Generator_RN(self.vocab_size, self.hidden_size, self.Nclass)
+            D = self.Discriminator(self.vocab_size, self.hidden_size, self.Nclass)
             
-          loss_dgnr = T.sum( (dgnr-self.Yg)**2 ) # for X_nr
-          self.loss_dis2 = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_dgnr)
-          gparams_dnr = []
-          for param in self.params_dis:
-              gparam = T.grad(loss_dgnr, param)
-              gparams_dnr.append(gparam)
-          updates_dnr = self.gradient_descent(self.params_dis, gparams_dnr, lr)
-          self.train_dnr = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_dnr)
-          
-          loss_dgrn = T.sum( (dgrn-self.Yg)**2 ) # for X_rn
-          self.loss_dis3 = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_dgrn)
-          gparams_drn = []
-          for param in self.params_dis:
-              gparam = T.grad(loss_dgrn, param)
-              gparams_drn.append(gparam)
-          updates_drn = self.gradient_descent(self.params_dis, gparams_drn, lr)
-          self.train_drn = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_drn)
+            self.params_dis = D.params_d
+            self.params_gnr = G_NR.params_gnr
+            self.params_grn = G_RN.params_grn
+            self.params_gen = G_NR.params_gnr + G_RN.params_grn          
+            lr = T.scalar("lr")
+            
+            '''step1: update generator_NR'''
+            X_nr = G_NR.generate(self.X_word, self.Len) # step 1.1: X_n -> G_nr -> X_nr(non-rumor1 -> rumor)
+            self.gen_nr = theano.function(inputs = [self.X_word, self.Len], outputs = X_nr)
+                                            
+            dgnr = D.discriminate(X_nr)
+            self.d_gen_nr = theano.function(inputs = [self.X_word, self.Len], outputs = dgnr)
 
-          loss_dgnrn = T.sum( (D.discriminate(X_nrn)-self.Y)**2 ) # for X_nrn
-          self.loss_dis4 = theano.function(inputs = [self.X_word, self.Len, self.Y], outputs = loss_dgnrn)
-          gparams_dnrn = []
-          for param in self.params_dis:
-              gparam = T.grad(loss_dgnrn, param)
-              gparams_dnrn.append(gparam)
-          updates_dnrn = self.gradient_descent(self.params_dis, gparams_dnrn, lr)
-          self.train_dnrn = theano.function(inputs = [self.X_word, self.Len, self.Y, lr], updates = updates_dnrn)
-          
-          loss_dgrnr = T.sum( (D.discriminate(X_rnr)-self.Y)**2 ) # for X_rnr
-          self.loss_dis5 = theano.function(inputs = [self.X_word, self.Len, self.Y], outputs = loss_dgrnr)
-          gparams_drnr = []
-          for param in self.params_dis:
-              gparam = T.grad(loss_dgrnr, param)
-              gparams_drnr.append(gparam)
-          updates_drnr = self.gradient_descent(self.params_dis, gparams_drnr, lr)
-          self.train_drnr = theano.function(inputs = [self.X_word, self.Len, self.Y, lr], updates = updates_drnr)
-          
-          gparams_dnr2 = []
-          for param in self.params_dis:
-              gparam = T.grad(0.3*loss_dgnr+0.5*loss_d1+0.2*loss_dgnrn, param)
-              gparams_dnr2.append(gparam)
-          updates_dnr2 = self.gradient_descent(self.params_dis, gparams_dnr2, lr)
-          self.train_dnr2 = theano.function(inputs = [self.X_word, self.Len, self.Y, self.Yg, lr], updates = updates_dnr2)
-          
-          gparams_drn2 = []
-          for param in self.params_dis:
-              gparam = T.grad(0.3*loss_dgrn+0.5*loss_d1+0.2*loss_dgrnr, param)
-              gparams_drn2.append(gparam)
-          updates_drn2 = self.gradient_descent(self.params_dis, gparams_drn2, lr)
-          self.train_drn2 = theano.function(inputs = [self.X_word, self.Len, self.Y, self.Yg, lr], updates = updates_drn2)
+            X_nrn = G_RN.generate(X_nr, self.Len) # step 1.2: X_nr -> G_rn -> X_nrn(rumor -> non-rumor2)
+            self.gen_nrn = theano.function(inputs = [self.X_word, self.Len], outputs = X_nrn)
+            
+            loss_nrn = D.contCmp(self.X_word, X_nrn)  # loss_rec: reconstruction loss
+            self.f_loss_nrn = theano.function(inputs = [self.X_word, self.Len], outputs = loss_nrn)
+
+            loss_gnr = T.sum((dgnr-self.Yg)**2) # loss_D: discriminator loss
+            self.loss_gen_nr = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_gnr)
+        
+            #loss_nr = loss_gnr + 0.02*loss_nrn 
+            loss_nr = loss_gnr + loss_nrn 
+            self.f_loss_nr = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_nr)
+
+            gparams_gnr_pre = [] ## only loss_D
+            for param in self.params_gnr:
+                gparam = T.grad(loss_gnr, param)
+                gparams_gnr_pre.append(gparam)
+            updates_gnr_pre = self.gradient_descent(self.params_gnr, gparams_gnr_pre, lr)
+            self.train_gnr_pre = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_gnr_pre)
+            
+            gparams_gnr = [] ## loss_D +loss_rec
+            for param in self.params_gen:
+                gparam = T.grad(loss_nr, param)
+                gparams_gnr.append(gparam)
+            updates_gnr= self.gradient_descent(self.params_gen, gparams_gnr, lr)
+            self.train_gnr = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_gnr)
+
+            '''step2: update generator_RN'''
+            X_rn = G_RN.generate(self.X_word, self.Len) # step 2.1: X_r -> G_rn -> X_rn
+            self.gen_rn = theano.function(inputs = [self.X_word, self.Len], outputs = X_rn)
+                                            
+            dgrn = D.discriminate( X_rn )
+            self.d_gen_rn = theano.function(inputs = [self.X_word, self.Len], outputs = dgrn)
+                    
+            loss_grn = T.sum( (dgrn-self.Yg)**2 ) # loss_D
+            self.loss_gen_rn = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_grn)
+            
+            X_rnr = G_NR.generate(X_rn, self.Len) # step 2.2: X_rn -> G_nr -> X_rnr
+            self.gen_rnr = theano.function(inputs = [self.X_word, self.Len], outputs = X_rnr)
+            
+            loss_rnr = D.contCmp(self.X_word, X_rnr) # loss_rec
+            self.f_loss_rnr = theano.function(inputs = [self.X_word, self.Len], outputs = loss_rnr)
+            
+            #loss_rn = loss_grn + 0.02*loss_rnr 
+            loss_rn = loss_grn + loss_rnr 
+            self.f_loss_rn = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_rn)
+            gparams_grn = [] 
+            for param in self.params_gen:
+                gparam = T.grad(loss_rn, param)
+                gparams_grn.append(gparam)
+            updates_grn = self.gradient_descent(self.params_gen, gparams_grn, lr)
+            self.train_grn = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_grn)
+            
+            gparams_grn_pre = [] ## only loss_D
+            for param in self.params_grn:
+                gparam = T.grad(loss_grn, param)
+                gparams_grn_pre.append(gparam)
+            updates_grn_pre = self.gradient_descent(self.params_grn, gparams_grn_pre, lr)
+            self.train_grn_pre = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_grn_pre)
+            
+            '''step3: update discriminator'''
+            d1 = D.discriminate(self.X_word) # discriminator output for original X
+            self.dis1 = theano.function(inputs = [self.X_word], outputs = d1)
+
+            loss_d1 = T.sum((d1-self.Y)**2) # discriminator loss for X
+            self.loss_dis1 = theano.function(inputs = [self.X_word, self.Y], outputs = loss_d1)
+            gparams_d = []
+            for param in self.params_dis:
+                gparam = T.grad(loss_d1, param)
+                gparams_d.append(gparam)
+            updates_d = self.gradient_descent(self.params_dis, gparams_d, lr)
+            self.train_d = theano.function(inputs = [self.X_word, self.Y, lr], updates = updates_d)
+            
+            loss_dgnr = T.sum((dgnr-self.Yg)**2) # discriminator loss for X_nr
+            self.loss_dis2 = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_dgnr)
+            gparams_dnr = []
+            for param in self.params_dis:
+                gparam = T.grad(loss_dgnr, param)
+                gparams_dnr.append(gparam)
+            updates_dnr = self.gradient_descent(self.params_dis, gparams_dnr, lr)
+            self.train_dnr = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_dnr)
+            
+            loss_dgrn = T.sum((dgrn-self.Yg)**2) # discriminator loss for X_rn
+            self.loss_dis3 = theano.function(inputs = [self.X_word, self.Len, self.Yg], outputs = loss_dgrn)
+            gparams_drn = []
+            for param in self.params_dis:
+                gparam = T.grad(loss_dgrn, param)
+                gparams_drn.append(gparam)
+            updates_drn = self.gradient_descent(self.params_dis, gparams_drn, lr)
+            self.train_drn = theano.function(inputs = [self.X_word, self.Len, self.Yg, lr], updates = updates_drn)
+
+            loss_dgnrn = T.sum((D.discriminate(X_nrn)-self.Y)**2) # discriminator loss for X_nrn
+            self.loss_dis4 = theano.function(inputs = [self.X_word, self.Len, self.Y], outputs = loss_dgnrn)
+            gparams_dnrn = []
+            for param in self.params_dis:
+                gparam = T.grad(loss_dgnrn, param)
+                gparams_dnrn.append(gparam)
+            updates_dnrn = self.gradient_descent(self.params_dis, gparams_dnrn, lr)
+            self.train_dnrn = theano.function(inputs = [self.X_word, self.Len, self.Y, lr], updates = updates_dnrn)
+            
+            loss_dgrnr = T.sum( (D.discriminate(X_rnr)-self.Y)**2 ) # discriminator loss for X_rnr
+            self.loss_dis5 = theano.function(inputs = [self.X_word, self.Len, self.Y], outputs = loss_dgrnr)
+            gparams_drnr = []
+            for param in self.params_dis:
+                gparam = T.grad(loss_dgrnr, param)
+                gparams_drnr.append(gparam)
+            updates_drnr = self.gradient_descent(self.params_dis, gparams_drnr, lr)
+            self.train_drnr = theano.function(inputs = [self.X_word, self.Len, self.Y, lr], updates = updates_drnr)
+
+            gparams_dnr2 = []
+            for param in self.params_dis:
+                gparam = T.grad(0.3*loss_dgnr+0.5*loss_d1+0.2*loss_dgnrn, param)
+                gparams_dnr2.append(gparam)
+            updates_dnr2 = self.gradient_descent(self.params_dis, gparams_dnr2, lr)
+            self.train_dnr2 = theano.function(inputs = [self.X_word, self.Len, self.Y, self.Yg, lr], updates = updates_dnr2)
+            
+            gparams_drn2 = []
+            for param in self.params_dis:
+                gparam = T.grad(0.3*loss_dgrn+0.5*loss_d1+0.2*loss_dgrnr, param)
+                gparams_drn2.append(gparam)
+            updates_drn2 = self.gradient_descent(self.params_dis, gparams_drn2, lr)
+            self.train_drn2 = theano.function(inputs = [self.X_word, self.Len, self.Y, self.Yg, lr], updates = updates_drn2)
 
     def gradient_descent(self, params, gparams, learning_rate):
         """Momentum GD with gradient clipping."""
@@ -338,8 +348,7 @@ class GAN():
         not_finite = T.or_(T.isnan(grad_norm), T.isinf(grad_norm))
         scaling_den = T.maximum(5.0, grad_norm)
         for n, (param, grad) in enumerate(zip(params, gparams)):
-            grad = T.switch(not_finite, 0.1 * param,
-                            grad * (5.0 / scaling_den))
+            grad = T.switch(not_finite, 0.1 * param, grad * (5.0 / scaling_den))
             velocity = self.momentum_velocity_[n]
             update_step = self.momentum * velocity - learning_rate * grad
             self.momentum_velocity_[n] = update_step
@@ -369,9 +378,9 @@ class GAN():
         Lg, Lc, L = 0, 0, 0
         ## for each training instance
         for i in range(len(yg)):
-            L += self.f_loss_nr(xw[i], l[i], yg[i])
-            Lg += self.loss_gen_nr(xw[i], l[i], yg[i])
-            Lc += self.f_loss_nrn(xw[i], l[i])
+            L += self.f_loss_nr(xw[i], l[i], yg[i]) # total generator loss = loss_D + loss_rec
+            Lg += self.loss_gen_nr(xw[i], l[i], yg[i]) # loss_D
+            Lc += self.f_loss_nrn(xw[i], l[i]) # loss_rec
         return Lg/len(yg), Lc/len(yg), L/len(yg) 
     
     def calculate_total_loss_gen_crn(self, xw, l, yg):

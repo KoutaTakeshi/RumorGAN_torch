@@ -7,9 +7,10 @@
 @time: Tue Nov 10 16:29:42 2015
 """
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf-8')
+# import importlib
+# import sys
+# importlib.reload(sys)
+# sys.setdefaultencoding('utf-8')
 
 import random
 import os
